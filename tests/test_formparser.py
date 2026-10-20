@@ -150,6 +150,42 @@ class TestFormParser:
             assert req.form["tx3065"][-1] == "x"
             assert req.form["tx3065"][65470:65473] == "y\r\n"
 
+    def test_chunk_split_in_epilogue_delimiter(self):
+        # The input stream returns at most 64 KiB per read, the same size as
+        # MultiPartParser's default buffer size. The body is sized so that the
+        # last read returns only the first three bytes of the CRLF and dashes
+        # in front of the closing delimiter. Those bytes belong to the
+        # delimiter and must not be released as part data.
+        class ChunkedInput:
+            def __init__(self, data):
+                self.stream = io.BytesIO(data)
+
+            def read(self, size=-1):
+                return self.stream.read(min(size, 64 * 1024))
+
+            def tell(self):
+                return self.stream.tell()
+
+            def seek(self, offset, whence=0):
+                return self.stream.seek(offset, whence)
+
+        sample = b"A" * 65411
+        data = (
+            b"--WZBOUND\r\n"
+            b'Content-Disposition: form-data; name="f"; filename="t.bin"\r\n'
+            b"Content-Type: application/octet-stream\r\n\r\n" + sample + b"\r\n"
+            b"--WZBOUND--\r\n"
+        )
+        assert len(data) % (64 * 1024) == 3
+
+        with Request.from_values(
+            input_stream=ChunkedInput(data),
+            content_length=len(data),
+            content_type="multipart/form-data; boundary=WZBOUND",
+            method="POST",
+        ) as req:
+            assert req.files["f"].read() == sample
+
     def test_parse_form_data_put_without_content(self) -> None:
         """PUT without content parses to empty form data."""
         with Request.from_values(method="PUT") as request:

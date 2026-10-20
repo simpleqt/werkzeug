@@ -80,8 +80,12 @@ class MultipartDecoder:
     The part data is returned as available to allow the caller to save
     the data from memory to disk, if desired.
 
+    .. versionchanged:: 3.2
+        Handle a ``\r\n`` sequence that a chunk boundary splits in front of a
+        boundary without releasing it as part data.
+
     .. versionchanged:: 3.1.4
-        Handle chunks that split a``\r\n`` sequence.
+        Handle chunks that split a ``\r\n`` sequence.
     """
 
     def __init__(
@@ -289,7 +293,23 @@ class MultipartDecoder:
         else:
             if last_cr < complete_boundary_index:
                 last_cr = len(data)
-        return min(last_nl, last_cr)
+        index = min(last_nl, last_cr)
+
+        # The data ends at a CR, which is the start of the CRLF that must
+        # precede the boundary. If the rest of that CRLF is all the buffer
+        # holds of a possible next boundary, this index points at that
+        # boundary's CRLF rather than at data. The check above cannot see
+        # that, it only rejects newlines that cannot be followed by a
+        # complete boundary.
+        if index > 0 and data[index - 1] == 0x0D:
+            boundary = b"--" + self.boundary
+
+            if data[index:].startswith(
+                (b"\r\n" + boundary, b"\r" + boundary, b"\n" + boundary, boundary)
+            ):
+                index = self._last_partial_boundary_index(data[: index - 1])
+
+        return index
 
 
 class MultipartEncoder:

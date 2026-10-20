@@ -107,6 +107,51 @@ def test_decoder_data_start_with_different_newline_positions(
     ]
 
 
+def decode_streaming(boundary: bytes, data: bytes, chunk_size: int) -> bytes:
+    """Feed a body to the decoder in chunks, consuming events as a parser does.
+
+    This mirrors ``MultiPartParser``, which calls ``next_event`` until it needs
+    more data instead of draining the decoder after the whole body is fed.
+    """
+    decoder = MultipartDecoder(boundary)
+    value = b""
+
+    for i in range(0, len(data), chunk_size):
+        decoder.receive_data(data[i : i + chunk_size])
+
+        event = decoder.next_event()
+
+        while not isinstance(event, (Epilogue, NeedData)):
+            if isinstance(event, Data):
+                value += event.data
+
+            event = decoder.next_event()
+
+    return value
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 3, 4, 6, 8, 12, 16])
+@pytest.mark.parametrize("value", [b"", b"A", b"AAAAA", b"A\r\n", b"\r\n"])
+def test_decoder_data_is_the_same_for_any_chunk_size(
+    chunk_size: int, value: bytes
+) -> None:
+    """How a body is split across chunks must not change the part data.
+
+    The CRLF in front of the closing delimiter belongs to the delimiter, even
+    when the chunk boundary falls in the middle of it. It must never be
+    released as part data.
+    """
+    boundary = b"WZBOUND"
+    data = (
+        b'--WZBOUND\r\nContent-Disposition: form-data; name="f"\r\n\r\n'
+        + value
+        + b"\r\n--WZBOUND--\r\n"
+    )
+
+    assert decode_streaming(boundary, data, chunk_size) == value
+    assert decode_streaming(boundary, data, len(data)) == value
+
+
 def test_chunked_boundaries() -> None:
     boundary = b"--boundary"
     decoder = MultipartDecoder(boundary)

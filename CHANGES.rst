@@ -279,6 +279,9 @@ Version 3.2.0
     :issue:`3328`
 -   Colorama is never used. Modern Windows terminals support ANSI styles
     natively. :pr:`3331`
+-   The multipart parser does not release the CRLF in front of a boundary as
+    part data when a chunk boundary falls inside it, which added a trailing
+    ``\r`` to the parsed value. :issue:`3285`
 
 
 Version 3.1.9
